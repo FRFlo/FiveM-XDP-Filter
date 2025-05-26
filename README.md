@@ -14,7 +14,7 @@ This XDP program protects a FiveM server by filtering out non-FiveM traffic. The
 
 Before compiling the program, update the FIVEM_SERVER_IP and FIVEM_SERVER_PORT macros in the XDP script to match your FiveM server's IP address and port.
 
-1. Open the `xdp_program.c` file.
+1. Open the `fivem_xdp.c` file.
 2. Modify the following macros:
 ```c
 #define FIVEM_SERVER_IP  0x7F000001  // Replace with your server's IP in hex format (e.g., 192.168.1.1 -> 0xC0A80101 or 0x7F000001 for 172.0.0.1 (Localhost)
@@ -28,7 +28,7 @@ Before compiling the program, update the FIVEM_SERVER_IP and FIVEM_SERVER_PORT m
 Use the clang compiler to compile the XDP program for your system:
 
 ```c 
-clang -O2 -target bpf -c xdp_program.c -o xdp_program.o
+clang -O2 -g -target bpf -c fivem_xdp.c -o xdp_program.o -I/usr/include -I/usr/include/$(uname -m)-linux-gnu
 ```
 
 This will produce the xdp_program.o object file that you can load into your network interface.

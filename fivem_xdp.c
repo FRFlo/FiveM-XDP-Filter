@@ -4,7 +4,7 @@
 #include <linux/in.h>
 #include <linux/udp.h>
 #include <bpf/bpf_helpers.h>
-#include <arpa/inet.h> // For htonl and htons
+#include <bpf/bpf_endian.h>
 
 #define FIVEM_SERVER_IP     0x7F000001      // 127.0.0.1
 #define FIVEM_SERVER_PORT   30120           // Replace with the port number of your FiveM server
@@ -48,7 +48,7 @@ int fivem_xdp(struct xdp_md *ctx) {
     }
 
     // Check that the packet is IPv4
-    if (eth->h_proto != htons(ETH_P_IP)) {
+    if (eth->h_proto != bpf_htons(ETH_P_IP)) {
         return XDP_PASS;  // Allow non-IPv4 packets
     }
 
@@ -70,7 +70,7 @@ int fivem_xdp(struct xdp_md *ctx) {
     }
 
     // Check if packet is destined for the FiveM server IP and port
-    if (ip->daddr != htonl(FIVEM_SERVER_IP) || udp->dest != htons(FIVEM_SERVER_PORT)) {
+    if (ip->daddr != bpf_htonl(FIVEM_SERVER_IP) || udp->dest != bpf_htons(FIVEM_SERVER_PORT)) {
         return XDP_PASS;  // Allow other UDP traffic
     }
 
