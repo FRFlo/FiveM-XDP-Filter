@@ -1,0 +1,13 @@
+# Configuration des tableaux de bord Grafana
+apiVersion: 1
+
+providers:
+  - name: 'FiveM XDP Dashboards'
+    orgId: 1
+    folder: 'FiveM XDP'
+    type: file
+    disableDeletion: false
+    updateIntervalSeconds: 10
+    allowUiUpdates: true
+    options:
+      path: /var/lib/grafana/dashboards

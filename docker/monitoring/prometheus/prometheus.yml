@@ -1,0 +1,95 @@
+# Configuration Prometheus pour la surveillance des filtres XDP FiveM
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    monitor: 'fivem-xdp-monitor'
+
+# Règles d'alerte
+rule_files:
+  - "rules/*.yml"
+
+# Configuration AlertManager
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets:
+          - alertmanager:9093
+
+# Cibles de collecte des métriques
+scrape_configs:
+  # Prometheus lui-même
+  - job_name: 'prometheus'
+    static_configs:
+      - targets: ['localhost:9090']
+
+  # Métriques système de l'hôte
+  - job_name: 'node-exporter'
+    static_configs:
+      - targets: ['node-exporter:9100']
+    scrape_interval: 30s
+
+  # Métriques des conteneurs
+  - job_name: 'cadvisor'
+    static_configs:
+      - targets: ['cadvisor:8080']
+    scrape_interval: 30s
+
+  # Exportateurs de métriques XDP FiveM
+  # Configuration pour plusieurs serveurs
+  - job_name: 'fivem-xdp-exporters'
+    static_configs:
+      # Serveur principal
+      - targets: ['host.docker.internal:9100']
+        labels:
+          server_name: 'fivem-main'
+          server_type: 'production'
+          server_size: 'medium'
+      
+      # Serveur de test (exemple)
+      - targets: ['host.docker.internal:9102']
+        labels:
+          server_name: 'fivem-test'
+          server_type: 'testing'
+          server_size: 'small'
+    
+    scrape_interval: 15s
+    scrape_timeout: 10s
+    metrics_path: /metrics
+    
+    # Relabeling pour ajouter des métadonnées
+    metric_relabel_configs:
+      - source_labels: [__name__]
+        regex: 'fivem_xdp_.*'
+        target_label: component
+        replacement: 'xdp_filter'
+
+  # Découverte automatique des exportateurs XDP (optionnel)
+  # Utilise la découverte DNS ou file_sd_config pour les déploiements dynamiques
+  - job_name: 'fivem-xdp-discovery'
+    file_sd_configs:
+      - files:
+          - '/etc/prometheus/targets/*.json'
+        refresh_interval: 30s
+    
+    scrape_interval: 15s
+    metrics_path: /metrics
+    
+    # Relabeling basé sur les métadonnées des fichiers de découverte
+    relabel_configs:
+      - source_labels: [__meta_filepath]
+        target_label: config_file
+      - source_labels: [__address__]
+        target_label: __param_target
+      - source_labels: [__param_target]
+        target_label: instance
+      - target_label: __address__
+        replacement: 'localhost:9100'
+
+# Configuration du stockage à long terme (optionnel)
+# remote_write:
+#   - url: "http://your-long-term-storage:9201/write"
+#     queue_config:
+#       max_samples_per_send: 1000
+#       max_shards: 200
+#       capacity: 2500

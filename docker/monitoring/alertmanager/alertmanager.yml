@@ -1,0 +1,128 @@
+# Configuration AlertManager pour les alertes FiveM XDP
+global:
+  smtp_smarthost: 'localhost:587'
+  smtp_from: 'alertmanager@fivem-xdp.local'
+  smtp_auth_username: ''
+  smtp_auth_password: ''
+
+# Modèles d'alertes
+templates:
+  - '/etc/alertmanager/templates/*.tmpl'
+
+# Configuration de routage des alertes
+route:
+  group_by: ['alertname', 'cluster', 'service']
+  group_wait: 10s
+  group_interval: 10s
+  repeat_interval: 1h
+  receiver: 'web.hook'
+  routes:
+    # Alertes critiques - notification immédiate
+    - match:
+        severity: critical
+      receiver: 'critical-alerts'
+      group_wait: 0s
+      repeat_interval: 5m
+    
+    # Alertes d'attaque - notification rapide
+    - match_re:
+        alertname: 'FiveMXDP.*Attack.*'
+      receiver: 'security-alerts'
+      group_wait: 5s
+      repeat_interval: 15m
+    
+    # Alertes de performance
+    - match:
+        component: xdp_filter
+      receiver: 'performance-alerts'
+      group_wait: 30s
+      repeat_interval: 30m
+
+# Récepteurs d'alertes
+receivers:
+  # Récepteur par défaut
+  - name: 'web.hook'
+    webhook_configs:
+      - url: 'http://localhost:5001/webhook'
+        send_resolved: true
+
+  # Alertes critiques
+  - name: 'critical-alerts'
+    email_configs:
+      - to: 'admin@fivem-server.local'
+        subject: '🚨 CRITIQUE: {{ .GroupLabels.alertname }}'
+        body: |
+          Alerte critique détectée sur le filtre XDP FiveM:
+          
+          Serveur: {{ range .Alerts }}{{ .Labels.server_name }}{{ end }}
+          Alerte: {{ .GroupLabels.alertname }}
+          Gravité: {{ .GroupLabels.severity }}
+          
+          Détails:
+          {{ range .Alerts }}
+          - {{ .Annotations.summary }}
+          - {{ .Annotations.description }}
+          {{ end }}
+          
+          Timestamp: {{ .Alerts.0.StartsAt }}
+    
+    webhook_configs:
+      - url: 'http://localhost:5001/critical'
+        send_resolved: true
+
+  # Alertes de sécurité
+  - name: 'security-alerts'
+    email_configs:
+      - to: 'security@fivem-server.local'
+        subject: '🛡️ SÉCURITÉ: Attaque détectée - {{ .GroupLabels.alertname }}'
+        body: |
+          Attaque détectée par le filtre XDP FiveM:
+          
+          {{ range .Alerts }}
+          Serveur: {{ .Labels.server_name }}
+          Type d'attaque: {{ .Labels.type }}
+          Description: {{ .Annotations.description }}
+          {{ end }}
+          
+          Action recommandée: Vérifier les logs et considérer le blocage des IPs sources.
+    
+    slack_configs:
+      - api_url: 'YOUR_SLACK_WEBHOOK_URL'
+        channel: '#security-alerts'
+        title: '🛡️ Attaque détectée sur {{ .GroupLabels.alertname }}'
+        text: |
+          {{ range .Alerts }}
+          **Serveur:** {{ .Labels.server_name }}
+          **Type:** {{ .Labels.type }}
+          **Description:** {{ .Annotations.description }}
+          {{ end }}
+
+  # Alertes de performance
+  - name: 'performance-alerts'
+    email_configs:
+      - to: 'ops@fivem-server.local'
+        subject: '📊 PERFORMANCE: {{ .GroupLabels.alertname }}'
+        body: |
+          Problème de performance détecté:
+          
+          {{ range .Alerts }}
+          Serveur: {{ .Labels.server_name }}
+          Métrique: {{ .Labels.alertname }}
+          Valeur: {{ .Annotations.description }}
+          {{ end }}
+
+# Inhibition des alertes (éviter le spam)
+inhibit_rules:
+  # Si le filtre est down, inhiber les autres alertes de ce serveur
+  - source_match:
+      alertname: 'FiveMXDPFilterDown'
+    target_match_re:
+      alertname: 'FiveMXDP.*'
+    equal: ['server_name']
+  
+  # Si l'exportateur est down, inhiber les alertes de métriques
+  - source_match:
+      alertname: 'FiveMXDPExporterDown'
+    target_match_re:
+      alertname: 'FiveMXDP.*'
+    equal: ['server_name']

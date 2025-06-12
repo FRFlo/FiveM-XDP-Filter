@@ -1,0 +1,928 @@
+@startuml FiveM XDP BPF Filter - Advanced Packet Processing Flow
+
+!theme plain
+skinparam backgroundColor #FFFFFF
+skinparam sequenceArrowThickness 2
+skinparam roundcorner 20
+skinparam maxmessagesize 60
+
+title FiveM XDP BPF Filter - Advanced Packet Processing Flow (Current Implementation)
+
+participant "Network\nInterface" as Network
+participant "XDP Hook" as XDP
+participant "fivem_xdp_advanced\n(Main Filter)" as Filter
+participant "Configuration\nManager" as Config
+participant "Performance\nTracker" as PerfTracker
+participant "Header\nParsers" as Parsers
+participant "Hierarchical\nRate Limiter" as HierRateLimit
+participant "Protocol State\nMachine" as StateMachine
+participant "Connection Token\nValidator" as TokenValidator
+participant "Sequence Number\nValidator" as SeqValidator
+participant "Checksum\nValidator" as ChecksumValidator
+participant "Attack Logger" as AttackLogger
+participant "Enhanced Statistics\nManager" as Stats
+participant "BPF Maps\n(12 different maps)" as Maps
+
+Network -> XDP: **Packet Arrival**
+activate XDP
+XDP -> Filter: fivem_xdp_advanced(ctx)
+activate Filter
+
+== Initialization & Configuration ==
+
+Filter -> PerfTracker: start_time = bpf_ktime_get_ns()
+activate PerfTracker
+PerfTracker --> Filter: Performance tracking started
+deactivate PerfTracker
+
+Filter -> Config: get_server_config()
+activate Config
+Config -> Maps: Lookup server_config_map[0]
+activate Maps
+Maps --> Config: Server configuration (or NULL)
+deactivate Maps
+Config --> Filter: Configuration loaded
+note over Config: Configurable values:\n- server_ip (0 = any IP)\n- server_port (default: 30120)\n- game_port1/2 (6672/6673)\n- rate limits\n- validation flags
+deactivate Config
+
+Filter -> Filter: Early packet size check\npacket_size = data_end - data
+alt packet_size < 42 (Eth+IP+UDP minimum)
+    Filter --> XDP: **XDP_ABORTED**
+    deactivate Filter
+    deactivate XDP
+end
+
+== Header Parsing & Protocol Validation ==
+
+Filter -> Parsers: Parse all headers in single pass
+activate Parsers
+Parsers -> Parsers: Parse Ethernet, IP, UDP headers
+Parsers -> Parsers: Bounds checking for all headers
+alt Any bounds check fails or ip->ihl < 5
+    Parsers --> Filter: **XDP_ABORTED**
+    Filter --> XDP: **XDP_ABORTED**
+    deactivate Parsers
+    deactivate Filter
+    deactivate XDP
+else Headers valid
+    Parsers -> Parsers: Protocol validation
+    alt Not IPv4 or Not UDP
+        Parsers --> Filter: **XDP_PASS** (Allow other traffic)
+        Filter --> XDP: **XDP_PASS**
+        deactivate Parsers
+        deactivate Filter
+        deactivate XDP
+    else IPv4 UDP packet
+        Parsers -> Parsers: Configurable IP validation
+        note over Parsers: If target_server_ip != 0:\nCheck ip->daddr == target_server_ip
+        alt IP validation fails
+            Parsers --> Filter: **XDP_PASS** (Not our server)
+            Filter --> XDP: **XDP_PASS**
+            deactivate Parsers
+            deactivate Filter
+            deactivate XDP
+        else IP validation passes
+            Parsers -> Parsers: Configurable port validation
+            note over Parsers: Check dest_port against:\n- server_port\n- game_port1\n- game_port2
+            alt Port not in configured set
+                Parsers --> Filter: **XDP_PASS** (Not FiveM traffic)
+                Filter --> XDP: **XDP_PASS**
+                deactivate Parsers
+                deactivate Filter
+                deactivate XDP
+            else FiveM traffic detected
+                Parsers --> Filter: Continue processing
+                deactivate Parsers
+            end
+        end
+    end
+end
+
+== Hierarchical Rate Limiting ==
+
+Filter -> HierRateLimit: hierarchical_rate_limit(src_ip, config)
+activate HierRateLimit
+note over HierRateLimit: Three-tier rate limiting:\n1. Global (50K pps default)\n2. Subnet /24 (5K pps default)\n3. Per-IP (1K pps default)
+
+HierRateLimit -> Maps: Check global_rate_map[0]
+activate Maps
+Maps --> HierRateLimit: Global rate state
+deactivate Maps
+HierRateLimit -> HierRateLimit: Validate global rate limit
+alt Global rate limit exceeded
+    HierRateLimit -> AttackLogger: log_attack(src_ip, ATTACK_RATE_LIMIT)
+    activate AttackLogger
+    AttackLogger -> Maps: Update attack_log_map
+    activate Maps
+    Maps --> AttackLogger: Attack logged
+    deactivate Maps
+    AttackLogger --> HierRateLimit: Attack logged
+    deactivate AttackLogger
+    HierRateLimit --> Filter: Rate limit exceeded
+    deactivate HierRateLimit
+    Filter -> Stats: update_stats(3) // rate_limited
+    activate Stats
+    Stats -> Maps: Update enhanced_stats_map
+    activate Maps
+    Maps --> Stats: Stats updated
+    deactivate Maps
+    Stats --> Filter: Stats updated
+    deactivate Stats
+    Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+    activate PerfTracker
+    PerfTracker -> Maps: Update perf_metrics_map
+    activate Maps
+    Maps --> PerfTracker: Metrics updated
+    deactivate Maps
+    PerfTracker --> Filter: Metrics updated
+    deactivate PerfTracker
+    Filter --> XDP: **XDP_DROP**
+    deactivate Filter
+    deactivate XDP
+else Global rate OK
+    HierRateLimit -> Maps: Check subnet_rate_map[subnet]
+    activate Maps
+    Maps --> HierRateLimit: Subnet rate state
+    deactivate Maps
+    HierRateLimit -> HierRateLimit: Validate subnet rate limit
+    alt Subnet rate limit exceeded
+        HierRateLimit -> AttackLogger: log_attack(src_ip, ATTACK_RATE_LIMIT)
+        activate AttackLogger
+        AttackLogger -> Maps: Update attack_log_map
+        activate Maps
+        Maps --> AttackLogger: Attack logged
+        deactivate Maps
+        AttackLogger --> HierRateLimit: Attack logged
+        deactivate AttackLogger
+        HierRateLimit --> Filter: Rate limit exceeded
+        deactivate HierRateLimit
+        Filter -> Stats: update_stats(3) // rate_limited
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_DROP**
+        deactivate Filter
+        deactivate XDP
+    else Subnet rate OK
+        HierRateLimit -> HierRateLimit: apply_rate_limit(src_ip, ip_limit)
+        HierRateLimit -> Maps: Check rate_limit_map[src_ip]
+        activate Maps
+        Maps --> HierRateLimit: Last timestamp
+        deactivate Maps
+        alt Per-IP rate limit exceeded
+            HierRateLimit --> Filter: Rate limit exceeded
+            deactivate HierRateLimit
+            Filter -> Stats: update_stats(3) // rate_limited
+            activate Stats
+            Stats -> Maps: Update enhanced_stats_map
+            activate Maps
+            Maps --> Stats: Stats updated
+            deactivate Maps
+            Stats --> Filter: Stats updated
+            deactivate Stats
+            Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+            activate PerfTracker
+            PerfTracker -> Maps: Update perf_metrics_map
+            activate Maps
+            Maps --> PerfTracker: Metrics updated
+            deactivate Maps
+            PerfTracker --> Filter: Metrics updated
+            deactivate PerfTracker
+            Filter --> XDP: **XDP_DROP**
+            deactivate Filter
+            deactivate XDP
+        else All rate limits OK
+            HierRateLimit -> Maps: Update rate_limit_map[src_ip]
+            activate Maps
+            Maps --> HierRateLimit: Updated
+            deactivate Maps
+            HierRateLimit --> Filter: Rate limiting passed
+            deactivate HierRateLimit
+        end
+    end
+end
+
+== Packet Size Validation ==
+
+Filter -> Filter: Validate packet size constraints
+Filter -> Filter: Check payload_len >= MIN_PACKET_SIZE (4)
+alt Payload too small
+    Filter -> Stats: update_stats(2) // invalid_protocol
+    activate Stats
+    Stats -> Maps: Update enhanced_stats_map
+    activate Maps
+    Maps --> Stats: Stats updated
+    deactivate Maps
+    Stats --> Filter: Stats updated
+    deactivate Stats
+    Filter -> AttackLogger: log_attack(src_ip, ATTACK_SIZE_VIOLATION)
+    activate AttackLogger
+    AttackLogger -> Maps: Update attack_log_map
+    activate Maps
+    Maps --> AttackLogger: Attack logged
+    deactivate Maps
+    AttackLogger --> Filter: Attack logged
+    deactivate AttackLogger
+    Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+    activate PerfTracker
+    PerfTracker -> Maps: Update perf_metrics_map
+    activate Maps
+    Maps --> PerfTracker: Metrics updated
+    deactivate Maps
+    PerfTracker --> Filter: Metrics updated
+    deactivate PerfTracker
+    Filter --> XDP: **XDP_DROP**
+    deactivate Filter
+    deactivate XDP
+else Size OK
+    Filter -> Filter: Determine max_size based on port
+    note over Filter: server_port: MAX_PACKET_SIZE (2400)\ngame_ports: MAX_VOICE_SIZE (8192)
+    alt Payload too large
+        Filter -> Stats: update_stats(2) // invalid_protocol
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> AttackLogger: log_attack(src_ip, ATTACK_SIZE_VIOLATION)
+        activate AttackLogger
+        AttackLogger -> Maps: Update attack_log_map
+        activate Maps
+        Maps --> AttackLogger: Attack logged
+        deactivate Maps
+        AttackLogger --> Filter: Attack logged
+        deactivate AttackLogger
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_DROP**
+        deactivate Filter
+        deactivate XDP
+    else Size within limits
+        Filter -> Filter: Check bounds for first 4 bytes
+        alt Cannot read first 4 bytes
+            Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+            activate PerfTracker
+            PerfTracker -> Maps: Update perf_metrics_map
+            activate Maps
+            Maps --> PerfTracker: Metrics updated
+            deactivate Maps
+            PerfTracker --> Filter: Metrics updated
+            deactivate PerfTracker
+            Filter --> XDP: **XDP_ABORTED**
+            deactivate Filter
+            deactivate XDP
+        else Can read payload
+            Filter -> Filter: Read first_word = *(u32*)payload
+            note over Filter: Continue with protocol-specific processing
+        end
+    end
+end
+
+== Protocol-Specific Processing ==
+
+Filter -> Filter: Check packet type by first_word
+alt first_word == OOB_PACKET_MARKER (0xFFFFFFFF)
+    note over Filter: **Out-of-Band (OOB) Packet Processing**
+
+    Filter -> Filter: Validate OOB packet size >= 8 bytes
+    alt OOB packet too small
+        Filter -> Stats: update_stats(2) // invalid_protocol
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> AttackLogger: log_attack(src_ip, ATTACK_INVALID_PROTOCOL)
+        activate AttackLogger
+        AttackLogger -> Maps: Update attack_log_map
+        activate Maps
+        Maps --> AttackLogger: Attack logged
+        deactivate Maps
+        AttackLogger --> Filter: Attack logged
+        deactivate AttackLogger
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_DROP**
+        deactivate Filter
+        deactivate XDP
+    else Valid OOB packet size
+        Filter -> Filter: Check for connection token (payload_len >= 12)
+        alt Has connection token
+            Filter -> TokenValidator: validate_connection_token(token_hash, src_ip)
+            activate TokenValidator
+            TokenValidator -> Maps: Lookup enhanced_token_map[token_hash]
+            activate Maps
+            Maps --> TokenValidator: Token state (or NULL)
+            deactivate Maps
+            alt New token
+                TokenValidator -> TokenValidator: Create new token state
+                TokenValidator -> Maps: Update enhanced_token_map[token_hash]
+                activate Maps
+                Maps --> TokenValidator: Token created
+                deactivate Maps
+                TokenValidator --> Filter: Token valid
+                deactivate TokenValidator
+            else Existing token
+                TokenValidator -> TokenValidator: Validate IP consistency
+                alt IP mismatch (anti-spoofing)
+                    TokenValidator -> AttackLogger: log_attack(src_ip, ATTACK_TOKEN_REUSE)
+                    activate AttackLogger
+                    AttackLogger -> Maps: Update attack_log_map
+                    activate Maps
+                    Maps --> AttackLogger: Attack logged
+                    deactivate Maps
+                    AttackLogger --> TokenValidator: Attack logged
+                    deactivate AttackLogger
+                    TokenValidator --> Filter: Token invalid
+                    deactivate TokenValidator
+                    Filter -> Stats: update_enhanced_stats(4) // token_violations
+                    activate Stats
+                    Stats -> Maps: Update enhanced_stats_map
+                    activate Maps
+                    Maps --> Stats: Stats updated
+                    deactivate Maps
+                    Stats --> Filter: Stats updated
+                    deactivate Stats
+                    Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                    activate PerfTracker
+                    PerfTracker -> Maps: Update perf_metrics_map
+                    activate Maps
+                    Maps --> PerfTracker: Metrics updated
+                    deactivate Maps
+                    PerfTracker --> Filter: Metrics updated
+                    deactivate PerfTracker
+                    Filter --> XDP: **XDP_DROP**
+                    deactivate Filter
+                    deactivate XDP
+                else IP matches
+                    TokenValidator -> TokenValidator: Check usage count <= 3
+                    alt Usage count exceeded
+                        TokenValidator -> AttackLogger: log_attack(src_ip, ATTACK_TOKEN_REUSE)
+                        activate AttackLogger
+                        AttackLogger -> Maps: Update attack_log_map
+                        activate Maps
+                        Maps --> AttackLogger: Attack logged
+                        deactivate Maps
+                        AttackLogger --> TokenValidator: Attack logged
+                        deactivate AttackLogger
+                        TokenValidator --> Filter: Token invalid
+                        deactivate TokenValidator
+                        Filter -> Stats: update_enhanced_stats(4) // token_violations
+                        activate Stats
+                        Stats -> Maps: Update enhanced_stats_map
+                        activate Maps
+                        Maps --> Stats: Stats updated
+                        deactivate Maps
+                        Stats --> Filter: Stats updated
+                        deactivate Stats
+                        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                        activate PerfTracker
+                        PerfTracker -> Maps: Update perf_metrics_map
+                        activate Maps
+                        Maps --> PerfTracker: Metrics updated
+                        deactivate Maps
+                        PerfTracker --> Filter: Metrics updated
+                        deactivate PerfTracker
+                        Filter --> XDP: **XDP_DROP**
+                        deactivate Filter
+                        deactivate XDP
+                    else Usage count OK
+                        TokenValidator -> TokenValidator: Check token age <= 2 hours
+                        alt Token expired
+                            TokenValidator -> AttackLogger: log_attack(src_ip, ATTACK_REPLAY)
+                            activate AttackLogger
+                            AttackLogger -> Maps: Update attack_log_map
+                            activate Maps
+                            Maps --> AttackLogger: Attack logged
+                            deactivate Maps
+                            AttackLogger --> TokenValidator: Attack logged
+                            deactivate AttackLogger
+                            TokenValidator --> Filter: Token invalid
+                            deactivate TokenValidator
+                            Filter -> Stats: update_enhanced_stats(4) // token_violations
+                            activate Stats
+                            Stats -> Maps: Update enhanced_stats_map
+                            activate Maps
+                            Maps --> Stats: Stats updated
+                            deactivate Maps
+                            Stats --> Filter: Stats updated
+                            deactivate Stats
+                            Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                            activate PerfTracker
+                            PerfTracker -> Maps: Update perf_metrics_map
+                            activate Maps
+                            Maps --> PerfTracker: Metrics updated
+                            deactivate Maps
+                            PerfTracker --> Filter: Metrics updated
+                            deactivate PerfTracker
+                            Filter --> XDP: **XDP_DROP**
+                            deactivate Filter
+                            deactivate XDP
+                        else Token valid
+                            TokenValidator -> TokenValidator: Increment usage count
+                            TokenValidator --> Filter: Token valid
+                            deactivate TokenValidator
+                        end
+                    end
+                end
+            end
+        end
+
+        Filter -> StateMachine: validate_protocol_state(src_ip, first_word, 0)
+        activate StateMachine
+        StateMachine -> Maps: Lookup connection_state_map[src_ip]
+        activate Maps
+        Maps --> StateMachine: Connection context (or NULL)
+        deactivate Maps
+        alt New connection
+            StateMachine -> StateMachine: Validate OOB start requirement
+            StateMachine -> StateMachine: Create new context (STATE_OOB_SENT)
+            StateMachine -> Maps: Update connection_state_map[src_ip]
+            activate Maps
+            Maps --> StateMachine: Context created
+            deactivate Maps
+            StateMachine --> Filter: State valid
+            deactivate StateMachine
+        else Existing connection
+            StateMachine -> StateMachine: Validate state transition
+            alt Invalid state transition
+                StateMachine -> StateMachine: Increment violations
+                alt Violations > 3
+                    StateMachine -> StateMachine: Mark as STATE_SUSPICIOUS
+                    StateMachine -> AttackLogger: log_attack(src_ip, ATTACK_STATE_VIOLATION)
+                    activate AttackLogger
+                    AttackLogger -> Maps: Update attack_log_map
+                    activate Maps
+                    Maps --> AttackLogger: Attack logged
+                    deactivate Maps
+                    AttackLogger --> StateMachine: Attack logged
+                    deactivate AttackLogger
+                    StateMachine --> Filter: State invalid
+                    deactivate StateMachine
+                    Filter -> Stats: update_enhanced_stats(6) // state_violations
+                    activate Stats
+                    Stats -> Maps: Update enhanced_stats_map
+                    activate Maps
+                    Maps --> Stats: Stats updated
+                    deactivate Maps
+                    Stats --> Filter: Stats updated
+                    deactivate Stats
+                    Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                    activate PerfTracker
+                    PerfTracker -> Maps: Update perf_metrics_map
+                    activate Maps
+                    Maps --> PerfTracker: Metrics updated
+                    deactivate Maps
+                    PerfTracker --> Filter: Metrics updated
+                    deactivate PerfTracker
+                    Filter --> XDP: **XDP_DROP**
+                    deactivate Filter
+                    deactivate XDP
+                else Violations <= 3
+                    StateMachine --> Filter: State valid (with warning)
+                    deactivate StateMachine
+                end
+            else Valid state transition
+                StateMachine --> Filter: State valid
+                deactivate StateMachine
+            end
+        end
+
+        Filter -> Stats: update_stats(1) // passed
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_PASS**
+        deactivate Filter
+        deactivate XDP
+    end
+else Regular ENet packet
+    note over Filter: **ENet Packet Processing**
+
+    Filter -> Filter: Parse ENet header
+    Filter -> Filter: Extract enet_header = *(u16*)payload
+    Filter -> Filter: peer_id = enet_header & ENET_MAX_PEER_ID (0x0FFF)
+    Filter -> Filter: flags = (enet_header >> 12) & 0xF
+
+    Filter -> Filter: Validate peer_id <= ENET_MAX_PEER_ID (4095)
+    alt Invalid peer ID
+        note over Filter: peer_id > 4095 (0x0FFF)
+        Filter -> Stats: update_stats(2) // invalid_protocol
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> AttackLogger: log_attack(src_ip, ATTACK_INVALID_PROTOCOL)
+        activate AttackLogger
+        AttackLogger -> Maps: Update attack_log_map
+        activate Maps
+        Maps --> AttackLogger: Attack logged
+        deactivate Maps
+        AttackLogger --> Filter: Attack logged
+        deactivate AttackLogger
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_DROP**
+        deactivate Filter
+        deactivate XDP
+    else Valid peer ID
+        Filter -> Filter: Extract sequence number (if payload_len >= 4)
+        alt Has sequence number and reliable packet
+            Filter -> SeqValidator: validate_sequence_number(src_ip, peer_id, sequence)
+            activate SeqValidator
+            SeqValidator -> Maps: Lookup peer_sequence_map[key]
+            activate Maps
+            note over Maps: key = (src_ip << 32) | peer_id
+            Maps --> SeqValidator: Peer state (or NULL)
+            deactivate Maps
+            alt New peer
+                SeqValidator -> SeqValidator: Create new peer state
+                SeqValidator -> Maps: Update peer_sequence_map[key]
+                activate Maps
+                Maps --> SeqValidator: Peer state created
+                deactivate Maps
+                SeqValidator --> Filter: Sequence valid
+                deactivate SeqValidator
+            else Existing peer
+                SeqValidator -> SeqValidator: Check sequence window
+                SeqValidator -> SeqValidator: seq_diff = sequence - last_sequence
+                alt Sequence in valid window
+                    SeqValidator -> SeqValidator: Update last_sequence
+                    SeqValidator -> Maps: Update peer_sequence_map[key]
+                    activate Maps
+                    Maps --> SeqValidator: Peer state updated
+                    deactivate Maps
+                    SeqValidator --> Filter: Sequence valid
+                    deactivate SeqValidator
+                else Sequence anomaly detected
+                    SeqValidator -> SeqValidator: Increment out_of_order_count
+                    alt Excessive out-of-order packets
+                        SeqValidator -> AttackLogger: log_attack(src_ip, ATTACK_SEQUENCE_ANOMALY)
+                        activate AttackLogger
+                        AttackLogger -> Maps: Update attack_log_map
+                        activate Maps
+                        Maps --> AttackLogger: Attack logged
+                        deactivate Maps
+                        AttackLogger --> SeqValidator: Attack logged
+                        deactivate AttackLogger
+                        SeqValidator --> Filter: Sequence invalid
+                        deactivate SeqValidator
+                        Filter -> Stats: update_enhanced_stats(5) // sequence_violations
+                        activate Stats
+                        Stats -> Maps: Update enhanced_stats_map
+                        activate Maps
+                        Maps --> Stats: Stats updated
+                        deactivate Maps
+                        Stats --> Filter: Stats updated
+                        deactivate Stats
+                        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                        activate PerfTracker
+                        PerfTracker -> Maps: Update perf_metrics_map
+                        activate Maps
+                        Maps --> PerfTracker: Metrics updated
+                        deactivate Maps
+                        PerfTracker --> Filter: Metrics updated
+                        deactivate PerfTracker
+                        Filter --> XDP: **XDP_DROP**
+                        deactivate Filter
+                        deactivate XDP
+                    else Acceptable out-of-order
+                        SeqValidator --> Filter: Sequence valid (with warning)
+                        deactivate SeqValidator
+                    end
+                end
+            end
+        end
+
+        Filter -> Filter: Optional checksum validation (if enabled)
+        alt Checksum validation enabled and payload_len >= 12
+            Filter -> ChecksumValidator: validate_enet_checksum(payload, payload_len, data_end, enable_validation)
+            activate ChecksumValidator
+            ChecksumValidator -> ChecksumValidator: Calculate simple hash (FNV-1a)
+            note over ChecksumValidator: Performance optimization:\nUse simple hash instead of full CRC32
+            ChecksumValidator -> ChecksumValidator: Compare with provided checksum
+            alt Checksum validation fails
+                ChecksumValidator --> Filter: Checksum invalid
+                deactivate ChecksumValidator
+                Filter -> Stats: update_enhanced_stats(7) // checksum_failures
+                activate Stats
+                Stats -> Maps: Update enhanced_stats_map
+                activate Maps
+                Maps --> Stats: Stats updated
+                deactivate Maps
+                Stats --> Filter: Stats updated
+                deactivate Stats
+                Filter -> AttackLogger: log_attack(src_ip, ATTACK_CHECKSUM_FAIL)
+                activate AttackLogger
+                AttackLogger -> Maps: Update attack_log_map
+                activate Maps
+                Maps --> AttackLogger: Attack logged
+                deactivate Maps
+                AttackLogger --> Filter: Attack logged
+                deactivate AttackLogger
+                Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                activate PerfTracker
+                PerfTracker -> Maps: Update perf_metrics_map
+                activate Maps
+                Maps --> PerfTracker: Metrics updated
+                deactivate Maps
+                PerfTracker --> Filter: Metrics updated
+                deactivate PerfTracker
+                Filter --> XDP: **XDP_DROP**
+                deactivate Filter
+                deactivate XDP
+            else Checksum valid
+                ChecksumValidator --> Filter: Checksum valid
+                deactivate ChecksumValidator
+            end
+        end
+
+        Filter -> Filter: Message hash validation (if payload_len >= 8)
+        alt Sufficient data for hash validation
+            Filter -> Filter: Extract msg_hash = *(u32*)(payload + 4)
+            Filter -> Filter: Check if dest_port == server_port (configurable)
+            alt Main server port - validate hash
+                note over Filter: Deep packet inspection for main port only
+                Filter -> Filter: is_valid_fivem_message_hash(msg_hash)
+                note over Filter: Optimized hash validation:\nGrouped by first byte for performance\nValidates against 28 known FiveM message types
+                alt Invalid message hash
+                    Filter -> Stats: update_stats(2) // invalid_protocol
+                    activate Stats
+                    Stats -> Maps: Update enhanced_stats_map
+                    activate Maps
+                    Maps --> Stats: Stats updated
+                    deactivate Maps
+                    Stats --> Filter: Stats updated
+                    deactivate Stats
+                    Filter -> AttackLogger: log_attack(src_ip, ATTACK_INVALID_PROTOCOL)
+                    activate AttackLogger
+                    AttackLogger -> Maps: Update attack_log_map
+                    activate Maps
+                    Maps --> AttackLogger: Attack logged
+                    deactivate Maps
+                    AttackLogger --> Filter: Attack logged
+                    deactivate AttackLogger
+                    Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                    activate PerfTracker
+                    PerfTracker -> Maps: Update perf_metrics_map
+                    activate Maps
+                    Maps --> PerfTracker: Metrics updated
+                    deactivate Maps
+                    PerfTracker --> Filter: Metrics updated
+                    deactivate PerfTracker
+                    Filter --> XDP: **XDP_DROP**
+                    deactivate Filter
+                    deactivate XDP
+                else Valid message hash
+                    note over Filter: Continue to state validation
+                end
+
+                Filter -> StateMachine: validate_protocol_state(src_ip, first_word, msg_hash)
+                activate StateMachine
+                StateMachine -> Maps: Lookup connection_state_map[src_ip]
+                activate Maps
+                Maps --> StateMachine: Connection context
+                deactivate Maps
+                StateMachine -> StateMachine: Validate state transition with message hash
+                note over StateMachine: State transitions:\nSTATE_OOB_SENT -> STATE_CONNECTING (MSG_CONFIRM_HASH)\nSTATE_CONNECTING -> STATE_CONNECTED (MSG_I_HOST_HASH/MSG_HE_HOST_HASH)\nSTATE_CONNECTED -> Allow all traffic\nSTATE_SUSPICIOUS -> Block all traffic
+                alt Invalid state transition
+                    StateMachine -> StateMachine: Increment violations
+                    alt Violations > 3
+                        StateMachine -> StateMachine: Mark as STATE_SUSPICIOUS
+                        StateMachine -> AttackLogger: log_attack(src_ip, ATTACK_STATE_VIOLATION)
+                        activate AttackLogger
+                        AttackLogger -> Maps: Update attack_log_map
+                        activate Maps
+                        Maps --> AttackLogger: Attack logged
+                        deactivate Maps
+                        AttackLogger --> StateMachine: Attack logged
+                        deactivate AttackLogger
+                        StateMachine --> Filter: State invalid
+                        deactivate StateMachine
+                        Filter -> Stats: update_enhanced_stats(6) // state_violations
+                        activate Stats
+                        Stats -> Maps: Update enhanced_stats_map
+                        activate Maps
+                        Maps --> Stats: Stats updated
+                        deactivate Maps
+                        Stats --> Filter: Stats updated
+                        deactivate Stats
+                        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+                        activate PerfTracker
+                        PerfTracker -> Maps: Update perf_metrics_map
+                        activate Maps
+                        Maps --> PerfTracker: Metrics updated
+                        deactivate Maps
+                        PerfTracker --> Filter: Metrics updated
+                        deactivate PerfTracker
+                        Filter --> XDP: **XDP_DROP**
+                        deactivate Filter
+                        deactivate XDP
+                    else Violations <= 3
+                        StateMachine --> Filter: State valid (with warning)
+                        deactivate StateMachine
+                    end
+                else Valid state transition
+                    StateMachine -> StateMachine: Update connection state
+                    StateMachine -> Maps: Update connection_state_map[src_ip]
+                    activate Maps
+                    Maps --> StateMachine: State updated
+                    deactivate Maps
+                    StateMachine --> Filter: State valid
+                    deactivate StateMachine
+                end
+            else Game port - skip hash validation
+                note over Filter: Game ports bypass hash validation\nfor performance optimization
+            end
+        end
+
+        Filter -> Stats: update_stats(1) // passed
+        activate Stats
+        Stats -> Maps: Update enhanced_stats_map
+        activate Maps
+        Maps --> Stats: Stats updated
+        deactivate Maps
+        Stats --> Filter: Stats updated
+        deactivate Stats
+        Filter -> PerfTracker: update_perf_metrics(start_time, packet_size)
+        activate PerfTracker
+        PerfTracker -> Maps: Update perf_metrics_map
+        activate Maps
+        Maps --> PerfTracker: Metrics updated
+        deactivate Maps
+        PerfTracker --> Filter: Metrics updated
+        deactivate PerfTracker
+        Filter --> XDP: **XDP_PASS**
+        deactivate Filter
+        deactivate XDP
+    end
+end
+
+== Summary of BPF Maps Usage ==
+
+note over Maps
+**Current BPF Maps Structure & Usage (12 Maps Total):**
+
+**1. server_config_map (ARRAY):**
+- Key: Index 0 (__u32)
+- Value: struct server_config
+- Purpose: Configurable server settings (IP, ports, rate limits, validation flags)
+
+**2. rate_limit_map (LRU_HASH):**
+- Key: Source IP address (__u32)
+- Value: Last packet timestamp (__u64)
+- Max entries: 10,000
+- Purpose: Per-IP rate limiting (configurable pps)
+
+**3. packet_count_map (PERCPU_ARRAY):**
+- Index 0-3: Basic packet counters
+- Purpose: Legacy statistics (backward compatibility)
+
+**4. enhanced_token_map (LRU_HASH):**
+- Key: Connection token hash (__u32)
+- Value: struct connection_token_state
+- Max entries: 5,000
+- Purpose: Enhanced token validation with replay protection
+
+**5. peer_sequence_map (LRU_HASH):**
+- Key: (src_ip << 32) | peer_id (__u64)
+- Value: struct peer_state
+- Max entries: 4,096
+- Purpose: Sequence number validation and replay attack prevention
+
+**6. connection_state_map (LRU_HASH):**
+- Key: Source IP address (__u32)
+- Value: struct connection_context
+- Max entries: 2,048
+- Purpose: Protocol state machine tracking
+
+**7. attack_log_map (HASH):**
+- Key: Attack ID (__u32)
+- Value: struct attack_stats
+- Max entries: 1,000
+- Purpose: Attack classification and logging
+
+**8. perf_metrics_map (PERCPU_ARRAY):**
+- Key: Index 0 (__u32)
+- Value: struct perf_metrics
+- Purpose: Performance monitoring and optimization
+
+**9. global_rate_map (ARRAY):**
+- Key: Index 0 (__u32)
+- Value: struct global_rate_state
+- Purpose: Global rate limiting (tier 1)
+
+**10. subnet_rate_map (LRU_HASH):**
+- Key: Subnet /24 (__u32)
+- Value: struct subnet_rate_state
+- Max entries: 1,024
+- Purpose: Subnet-level rate limiting (tier 2)
+
+**11. enhanced_stats_map (PERCPU_ARRAY):**
+- Key: Index 0 (__u32)
+- Value: struct enhanced_stats
+- Purpose: Comprehensive attack classification statistics
+
+**12. (Future expansion reserved)**
+end note
+
+== Attack Classification & Decision Matrix ==
+
+note over Filter
+**Current Attack Types Detected:**
+1. ATTACK_RATE_LIMIT - Hierarchical rate limiting violations
+2. ATTACK_INVALID_PROTOCOL - Invalid packet structure/content
+3. ATTACK_REPLAY - Token replay or sequence replay attacks
+4. ATTACK_STATE_VIOLATION - Protocol state machine violations
+5. ATTACK_CHECKSUM_FAIL - Packet integrity validation failures
+6. ATTACK_SIZE_VIOLATION - Invalid packet size constraints
+7. ATTACK_SEQUENCE_ANOMALY - Excessive out-of-order packets
+8. ATTACK_TOKEN_REUSE - Connection token abuse
+
+**Decision Flow Summary:**
+
+**XDP_PASS:** Legitimate FiveM traffic
+- Valid headers (Ethernet/IP/UDP) with proper bounds checking
+- Configurable destination validation (IP + ports)
+- Valid packet size constraints (port-specific limits)
+- Valid ENet protocol structure (peer ID, sequence, checksum)
+- Passes hierarchical rate limiting (global/subnet/IP)
+- Valid FiveM message hash (main port only)
+- Proper protocol state transitions
+- Valid connection tokens (anti-replay protection)
+
+**XDP_DROP:** Malicious/Invalid traffic
+- Rate limit violations (any tier)
+- Invalid packet size (too small/large for port type)
+- Invalid peer ID (> 4095)
+- Invalid message hash (main server port only)
+- Protocol state violations (> 3 violations = suspicious)
+- Connection token abuse (IP spoofing, usage count, age)
+- Sequence number anomalies (potential replay attacks)
+- Checksum validation failures (if enabled)
+
+**XDP_ABORTED:** Parsing errors
+- Insufficient packet data for processing
+- Bounds check failures during header parsing
+- Memory access violations
+- Cannot read required packet fields
+
+**Performance Optimizations:**
+- Single-pass header parsing
+- Early packet rejection for non-FiveM traffic
+- Configurable validation levels
+- Optimized hash lookup (grouped by first byte)
+- Optional checksum validation for performance tuning
+- Per-CPU statistics for scalability
+end note
+
+@enduml

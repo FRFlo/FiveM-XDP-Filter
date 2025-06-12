@@ -1,37 +1,72 @@
-# XDP Program for Protecting a FiveM Server
+# 🛡️ FiveM XDP Filter - Protection DDoS Avancée
 
-This XDP program protects a FiveM server by filtering out non-FiveM traffic. The program inspects incoming packets and drops any packets that are not UDP packets destined for the FiveM server IP address and port. Additionally, it includes rate-limiting and safety checks to prevent legitimate traffic from being inadvertently dropped.
+Ce système de filtrage XDP protège les serveurs FiveM contre les attaques DDoS et le trafic malveillant. Il inclut un déploiement automatisé avec surveillance en temps réel via Grafana.
 
-## Requirements
+## 🚀 Démarrage Rapide
 
-- Linux kernel with XDP support enabled.
-- Clang compiler for compiling the XDP program.
-- Basic knowledge of Linux networking and handling interfaces.
-
-## Installation
-
-### Step 1: Modify the XDP Program
-
-Before compiling the program, update the FIVEM_SERVER_IP and FIVEM_SERVER_PORT macros in the XDP script to match your FiveM server's IP address and port.
-
-1. Open the `fivem_xdp.c` file.
-2. Modify the following macros:
-```c
-#define FIVEM_SERVER_IP  0x7F000001  // Replace with your server's IP in hex format (e.g., 192.168.1.1 -> 0xC0A80101 or 0x7F000001 for 172.0.0.1 (Localhost)
-#define FIVEM_SERVER_PORT 30120      // Replace with your server's port if different
+**Déploiement en une commande :**
+```bash
+sudo ./deploy.sh deploy -s 192.168.1.100 -n mon-serveur
 ```
 
-`Note: Changing the default FiveM port (30120) to something else is recommended for better security.`
+**Accès aux interfaces :**
+- 📊 **Grafana** : http://localhost:3000 (admin/admin123)
+- 🔍 **Prometheus** : http://localhost:9090
+- 🚨 **AlertManager** : http://localhost:9093
 
-### Step 2: Compile the XDP Program
+## 📋 Prérequis
 
-Use the clang compiler to compile the XDP program for your system:
+- **OS :** Linux avec support XDP (Ubuntu 20.04+ recommandé)
+- **Kernel :** Version 4.18+ avec support XDP/eBPF
+- **Docker :** Version 20.10+
+- **Docker Compose :** Version 2.0+ (syntaxe moderne)
+- **Privilèges :** Accès root requis
+- **Outils :** clang, gcc, bpftool (installés automatiquement)
 
-```c 
-clang -O2 -g -target bpf -c fivem_xdp.c -o xdp_program.o -I/usr/include -I/usr/include/$(uname -m)-linux-gnu
+## 🎯 Fonctionnalités
+
+- ✅ **Protection DDoS avancée** avec filtrage XDP haute performance
+- ✅ **Déploiement automatisé** pour multiple serveurs FiveM
+- ✅ **Surveillance complète** avec Prometheus + Grafana
+- ✅ **Alertes intelligentes** via AlertManager
+- ✅ **Configuration flexible** (small/medium/large servers)
+- ✅ **Containerisation complète** pour faciliter la gestion
+
+## 📖 Documentation Complète
+
+- 🚀 **[Guide de Démarrage Rapide](QUICK_START.md)** - Déploiement en 5 minutes
+- 🐳 **[Documentation Docker](docker/README.md)** - Containerisation et monitoring
+- 📊 **[Solution de Déploiement](DEPLOYMENT_SOLUTION.md)** - Architecture complète
+- 📋 **[Rapport de Validation](VALIDATION_REPORT.md)** - Tests et validation
+- 📚 **[Documentation Technique](xdp_docs/README.md)** - Détails techniques
+
+## 🛠️ Installation Manuelle (Avancée)
+
+Si vous préférez une installation manuelle sans Docker :
+
+### Étape 1 : Compilation
+```bash
+# Compiler le filtre XDP et les outils
+make all
 ```
 
-This will produce the xdp_program.o object file that you can load into your network interface.
+### Étape 2 : Installation
+```bash
+# Installer le filtre sur l'interface réseau
+sudo make install INTERFACE=eth0
+```
+
+### Étape 3 : Configuration
+```bash
+# Configurer pour votre serveur (remplacez l'IP)
+make config-medium SERVER_IP=192.168.1.100
+```
+
+### Étape 4 : Vérification
+```bash
+# Vérifier le fonctionnement
+make stats
+```
 
 ### Step 3: Load the XDP Program
 

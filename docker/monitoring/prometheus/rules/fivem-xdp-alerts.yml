@@ -1,0 +1,125 @@
+# Règles d'alerte pour les filtres XDP FiveM
+groups:
+  - name: fivem-xdp-alerts
+    rules:
+      # Alerte si le filtre XDP est inactif
+      - alert: FiveMXDPFilterDown
+        expr: fivem_xdp_filter_active == 0
+        for: 1m
+        labels:
+          severity: critical
+          component: xdp_filter
+        annotations:
+          summary: "Filtre XDP FiveM inactif sur {{ $labels.instance }}"
+          description: "Le filtre XDP FiveM n'est pas actif sur le serveur {{ $labels.server_name }} ({{ $labels.instance }})"
+
+      # Alerte si trop de paquets sont rejetés
+      - alert: FiveMXDPHighDropRate
+        expr: rate(fivem_xdp_packets_dropped[5m]) > 1000
+        for: 2m
+        labels:
+          severity: warning
+          component: xdp_filter
+        annotations:
+          summary: "Taux élevé de paquets rejetés sur {{ $labels.instance }}"
+          description: "Le serveur {{ $labels.server_name }} rejette {{ $value }} paquets/sec, possible attaque DDoS"
+
+      # Alerte si beaucoup d'attaques sont détectées
+      - alert: FiveMXDPAttackDetected
+        expr: rate(fivem_xdp_attacks_detected_total[1m]) > 10
+        for: 30s
+        labels:
+          severity: critical
+          component: xdp_filter
+        annotations:
+          summary: "Attaques détectées sur {{ $labels.instance }}"
+          description: "{{ $value }} attaques/min détectées sur {{ $labels.server_name }} (type: {{ $labels.type }})"
+
+      # Alerte si le temps de traitement est trop élevé
+      - alert: FiveMXDPHighProcessingTime
+        expr: fivem_xdp_avg_processing_time_ns > 10000
+        for: 5m
+        labels:
+          severity: warning
+          component: xdp_filter
+        annotations:
+          summary: "Temps de traitement élevé sur {{ $labels.instance }}"
+          description: "Temps de traitement moyen: {{ $value }}ns sur {{ $labels.server_name }}"
+
+      # Alerte si trop de violations de séquence
+      - alert: FiveMXDPSequenceViolations
+        expr: rate(fivem_xdp_sequence_violations[5m]) > 50
+        for: 2m
+        labels:
+          severity: warning
+          component: xdp_filter
+        annotations:
+          summary: "Violations de séquence détectées sur {{ $labels.instance }}"
+          description: "{{ $value }} violations de séquence/sec sur {{ $labels.server_name }}"
+
+      # Alerte si l'exportateur de métriques ne répond pas
+      - alert: FiveMXDPExporterDown
+        expr: up{job="fivem-xdp-exporters"} == 0
+        for: 1m
+        labels:
+          severity: warning
+          component: metrics_exporter
+        annotations:
+          summary: "Exportateur de métriques XDP hors ligne"
+          description: "L'exportateur de métriques pour {{ $labels.server_name }} ne répond pas"
+
+      # Alerte si pas de mise à jour des métriques
+      - alert: FiveMXDPMetricsStale
+        expr: time() - fivem_xdp_last_update_timestamp > 300
+        for: 1m
+        labels:
+          severity: warning
+          component: metrics_exporter
+        annotations:
+          summary: "Métriques XDP obsolètes sur {{ $labels.instance }}"
+          description: "Aucune mise à jour des métriques depuis {{ $value }}s sur {{ $labels.server_name }}"
+
+  - name: fivem-xdp-performance
+    rules:
+      # Règle pour calculer le taux de paquets traités
+      - record: fivem_xdp:packet_rate
+        expr: rate(fivem_xdp_packets_total[1m])
+
+      # Règle pour calculer le pourcentage de paquets rejetés
+      - record: fivem_xdp:drop_percentage
+        expr: |
+          (
+            rate(fivem_xdp_packets_dropped[5m]) /
+            (rate(fivem_xdp_packets_passed[5m]) + rate(fivem_xdp_packets_dropped[5m]))
+          ) * 100
+
+      # Règle pour calculer la charge du filtre
+      - record: fivem_xdp:filter_load
+        expr: |
+          (
+            rate(fivem_xdp_packets_total[1m]) * fivem_xdp_avg_processing_time_ns
+          ) / 1000000000
+
+  - name: fivem-system-alerts
+    rules:
+      # Alerte si l'utilisation CPU est trop élevée
+      - alert: FiveMHostHighCPU
+        expr: 100 - (avg by(instance) (irate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 5m
+        labels:
+          severity: warning
+          component: system
+        annotations:
+          summary: "Utilisation CPU élevée sur {{ $labels.instance }}"
+          description: "CPU à {{ $value }}% sur l'hôte {{ $labels.instance }}"
+
+      # Alerte si la mémoire est faible
+      - alert: FiveMHostLowMemory
+        expr: (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes) * 100 < 10
+        for: 2m
+        labels:
+          severity: critical
+          component: system
+        annotations:
+          summary: "Mémoire faible sur {{ $labels.instance }}"
+          description: "Seulement {{ $value }}% de mémoire disponible sur {{ $labels.instance }}"
