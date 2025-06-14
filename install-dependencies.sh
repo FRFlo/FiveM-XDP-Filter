@@ -29,15 +29,29 @@ case $OS in
     *Ubuntu*|*Debian*)
         echo "🔄 Installation des paquets Ubuntu/Debian..."
         sudo apt update
+
+        # Essayer d'installer les en-têtes spécifiques au noyau
+        if ! sudo apt install -y linux-headers-$(uname -r) 2>/dev/null; then
+            echo "⚠️  En-têtes spécifiques non disponibles, installation des en-têtes génériques..."
+            sudo apt install -y \
+                linux-headers-amd64 \
+                linux-headers-generic \
+                linux-libc-dev
+        fi
+
+        # Installer les autres dépendances
         sudo apt install -y \
-            linux-headers-$(uname -r) \
             libbpf-dev \
+            libelf-dev \
             clang \
             llvm \
-            bpftool \
             gcc \
             make \
-            pkg-config
+            pkg-config \
+            zlib1g-dev
+
+        # Essayer d'installer bpftool (peut ne pas être disponible sur toutes les versions)
+        sudo apt install -y bpftool 2>/dev/null || echo "⚠️  bpftool non disponible dans les dépôts"
         ;;
     *CentOS*|*"Red Hat"*|*Rocky*)
         echo "🔄 Installation des paquets CentOS/RHEL/Rocky..."
@@ -106,12 +120,20 @@ echo "🔍 Vérification de l'installation..."
 echo "🔍 Verifying installation..."
 
 # Vérifier les en-têtes du noyau / Check kernel headers
-if [ -d "/usr/src/linux-headers-$(uname -r)" ] || [ -d "/lib/modules/$(uname -r)/build" ]; then
-    echo "✅ En-têtes du noyau installés"
-    echo "✅ Kernel headers installed"
-else
+HEADERS_FOUND=0
+for header_path in "/usr/src/linux-headers-$(uname -r)" "/lib/modules/$(uname -r)/build" "/usr/include/linux" "/usr/src/linux-headers-amd64"; do
+    if [ -d "$header_path" ]; then
+        echo "✅ En-têtes du noyau trouvés: $header_path"
+        echo "✅ Kernel headers found: $header_path"
+        HEADERS_FOUND=1
+        break
+    fi
+done
+
+if [ $HEADERS_FOUND -eq 0 ]; then
     echo "⚠️  En-têtes du noyau non trouvés dans les emplacements standard"
     echo "⚠️  Kernel headers not found in standard locations"
+    echo "📋 Vérifiez manuellement avec: ls /usr/include/linux/"
 fi
 
 # Vérifier clang / Check clang

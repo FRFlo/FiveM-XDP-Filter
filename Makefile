@@ -5,7 +5,17 @@
 CLANG ?= clang
 GCC ?= gcc
 CFLAGS := -O2 -Wall -Wextra
-BPF_CFLAGS := -O2 -target bpf -D__TARGET_ARCH_x86 -I/usr/src/linux-headers-$(shell uname -r)/include -I/usr/src/linux-headers-$(shell uname -r)/arch/x86/include
+# Détection automatique des chemins d'en-têtes
+KERNEL_HEADERS := $(shell find /usr/src -name "linux-headers*" -type d 2>/dev/null | head -1)
+ifeq ($(KERNEL_HEADERS),)
+    KERNEL_HEADERS := /usr/include
+endif
+
+BPF_CFLAGS := -O2 -target bpf -D__TARGET_ARCH_x86 \
+    -I$(KERNEL_HEADERS)/include \
+    -I$(KERNEL_HEADERS)/arch/x86/include \
+    -I/usr/include \
+    -I/usr/include/x86_64-linux-gnu
 LDFLAGS := -lbpf
 
 # Source files
