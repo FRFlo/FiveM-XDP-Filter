@@ -305,14 +305,14 @@ static __always_inline void update_enhanced_stats(__u32 stat_type) {
     if (!stats) return;
 
     switch (stat_type) {
-        case 0: __sync_fetch_and_add(&stats->dropped, 1); break;
-        case 1: __sync_fetch_and_add(&stats->passed, 1); break;
-        case 2: __sync_fetch_and_add(&stats->invalid_protocol, 1); break;
-        case 3: __sync_fetch_and_add(&stats->rate_limited, 1); break;
-        case 4: __sync_fetch_and_add(&stats->token_violations, 1); break;
-        case 5: __sync_fetch_and_add(&stats->sequence_violations, 1); break;
-        case 6: __sync_fetch_and_add(&stats->state_violations, 1); break;
-        case 7: __sync_fetch_and_add(&stats->checksum_failures, 1); break;
+        case 0: stats->dropped++; break;
+        case 1: stats->passed++; break;
+        case 2: stats->invalid_protocol++; break;
+        case 3: stats->rate_limited++; break;
+        case 4: stats->token_violations++; break;
+        case 5: stats->sequence_violations++; break;
+        case 6: stats->state_violations++; break;
+        case 7: stats->checksum_failures++; break;
     }
 }
 
@@ -320,26 +320,25 @@ static __always_inline void update_enhanced_stats(__u32 stat_type) {
 static __always_inline void update_stats(__u32 stat_type) {
     __u64 *count = bpf_map_lookup_elem(&packet_count_map, &stat_type);
     if (count) {
-        __sync_fetch_and_add(count, 1);
+        (*count)++;
     }
     update_enhanced_stats(stat_type);
 }
 
 // Fonction de journalisation des attaques
 static __always_inline void log_attack(__u32 src_ip, enum attack_type type) {
-    static __u32 attack_id = 0;
+    // Utiliser l'IP source et le timestamp comme clé unique
+    __u64 now = bpf_ktime_get_ns();
+    __u32 id = (src_ip ^ (__u32)(now >> 32)) % 1000;
 
     struct attack_stats stats = {
         .count = 1,
-        .last_seen = bpf_ktime_get_ns(),
+        .last_seen = now,
         .source_ip = src_ip,
         .attack_type = type
     };
 
-    __u32 id = __sync_fetch_and_add(&attack_id, 1);
-    if (id < 1000) { // Empêcher le débordement
-        bpf_map_update_elem(&attack_log_map, &id, &stats, BPF_ANY);
-    }
+    bpf_map_update_elem(&attack_log_map, &id, &stats, BPF_ANY);
 }
 
 // Suivi des métriques de performance
@@ -351,8 +350,8 @@ static __always_inline void update_perf_metrics(__u64 start_time, __u32 packet_s
     struct perf_metrics *metrics = bpf_map_lookup_elem(&perf_metrics_map, &key);
     if (!metrics) return;
 
-    __sync_fetch_and_add(&metrics->total_packets, 1);
-    __sync_fetch_and_add(&metrics->processing_time_ns, processing_time);
+    metrics->total_packets++;
+    metrics->processing_time_ns += processing_time;
 
     if (processing_time > metrics->max_processing_time_ns) {
         metrics->max_processing_time_ns = processing_time;
@@ -461,6 +460,14 @@ static __always_inline int validate_protocol_state(__u32 src_ip, __u32 first_wor
 
     // Validation de la transition d'état
     switch (ctx->state) {
+        case STATE_INITIAL:
+            // État initial - doit commencer par OOB
+            if (first_word == OOB_PACKET_MARKER) {
+                ctx->state = STATE_OOB_SENT;
+                ctx->state_timestamp = now;
+                return 1;
+            }
+            break;
         case STATE_OOB_SENT:
             if (msg_hash == MSG_CONFIRM_HASH) {
                 ctx->state = STATE_CONNECTING;
