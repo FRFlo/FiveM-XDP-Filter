@@ -1,55 +1,66 @@
-# 🚀 Guide de Démarrage Rapide - FiveM XDP Filter
+# 🚀 Guide de Démarrage Rapide - FiveM XDP Filter (Debian 12)
 
-Ce guide vous permet de déployer rapidement un filtre XDP pour votre serveur FiveM avec surveillance complète en moins de 5 minutes.
+Ce guide vous permet de déployer rapidement un filtre XDP pour votre serveur FiveM avec surveillance complète en moins de 5 minutes sur **Debian 12 exclusivement**.
 
-## ⚡ Démarrage Ultra-Rapide (1 commande)
+## ⚡ Installation Ultra-Rapide (1 commande)
 
 ```bash
 # Remplacez 192.168.1.100 par l'IP de votre serveur FiveM
-sudo ./deploy.sh deploy -s 192.168.1.100 -n mon-serveur
+sudo ./install.sh -s 192.168.1.100
 ```
 
-**C'est tout !** Votre serveur est maintenant protégé et surveillé.
+**C'est tout !** Votre serveur est maintenant protégé et surveillé avec installation complète automatisée.
 
 ## 🎯 Accès aux Interfaces
 
-Après le déploiement, accédez à :
+Après l'installation, accédez à :
 
 - **📊 Grafana** : http://localhost:3000
   - Utilisateur : `admin`
   - Mot de passe : `admin123`
-  
+
 - **🔍 Prometheus** : http://localhost:9090
 - **🚨 AlertManager** : http://localhost:9093
+- **📈 Métriques** : http://localhost:9100/metrics
 
-## 📋 Prérequis (Installation Automatique)
+## 📋 Prérequis (Vérification Automatique)
 
-Le script vérifie et installe automatiquement :
-- Docker & Docker Compose
-- Outils BPF (bpftool, clang)
-- Support XDP du kernel
+Le script `install.sh` vérifie et installe automatiquement sur **Debian 12** :
+- Validation de la distribution (Debian 12 uniquement)
+- Docker & Docker Compose (installation automatique)
+- Outils BPF optimisés pour Debian 12 (bpftool, clang, libbpf-dev)
+- Support XDP du kernel avec validation complète
 
-## 🛠️ Exemples de Déploiement
+## 🛠️ Exemples d'Installation
+
+### Installation Basique (Recommandée)
+```bash
+# Installation complète avec monitoring
+sudo ./install.sh -s 192.168.1.100
+```
 
 ### Serveur Principal (Production)
 ```bash
-sudo ./deploy.sh deploy -s 192.168.1.100 -n main-server -z large
+# Installation optimisée pour gros serveur
+sudo ./install.sh -s 192.168.1.100 -z large -n main-server -i eth0
 ```
 
 ### Serveur de Test
 ```bash
-sudo ./deploy.sh deploy -s 10.0.0.50 -n test-server -z small
+# Installation légère pour tests
+sudo ./install.sh -s 10.0.0.50 -z small -n test-server
 ```
 
-### Serveur avec Interface Spécifique
+### Serveur de Développement
 ```bash
-sudo ./deploy.sh deploy -s 172.16.1.10 -n server-2 -i ens3
+# Installation sans monitoring pour développement
+sudo ./install.sh -s 127.0.0.1 -z dev --no-monitoring
 ```
 
-### Déploiement Multi-Serveurs
+### Installation avec Interface Spécifique
 ```bash
-# Utiliser le script d'exemple
-sudo config/examples/multi-server-setup.sh
+# Pour serveurs avec interfaces réseau personnalisées
+sudo ./install.sh -s 172.16.1.10 -i ens18 -n server-2
 ```
 
 ## 📊 Que Surveiller dans Grafana

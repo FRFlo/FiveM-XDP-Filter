@@ -1,119 +1,76 @@
 #!/bin/bash
-# Installation automatique des dépendances pour FiveM XDP Filter
-# Automatic dependency installation for FiveM XDP Filter
+# Installation automatique des dépendances pour FiveM XDP Filter - Debian 12 exclusivement
+# Automatic dependency installation for FiveM XDP Filter - Debian 12 exclusively
 
 set -e
 
-echo "🔧 Installation des dépendances pour FiveM XDP Filter..."
-echo "🔧 Installing dependencies for FiveM XDP Filter..."
+echo "🔧 Installation des dépendances pour FiveM XDP Filter (Debian 12)..."
+echo "🔧 Installing dependencies for FiveM XDP Filter (Debian 12)..."
 
-# Détecter la distribution / Detect distribution
+# Vérifier que nous sommes sur Debian 12
 if [ -f /etc/os-release ]; then
     . /etc/os-release
-    OS=$NAME
-    VER=$VERSION_ID
-elif type lsb_release >/dev/null 2>&1; then
-    OS=$(lsb_release -si)
-    VER=$(lsb_release -sr)
+    if [[ "$ID" != "debian" ]] || [[ "$VERSION_ID" != "12" ]]; then
+        echo "❌ Ce script est conçu exclusivement pour Debian 12"
+        echo "❌ This script is designed exclusively for Debian 12"
+        echo "📋 Distribution détectée: $ID $VERSION_ID"
+        echo "📋 Detected distribution: $ID $VERSION_ID"
+        exit 1
+    fi
 else
     echo "❌ Impossible de détecter la distribution Linux"
     echo "❌ Cannot detect Linux distribution"
     exit 1
 fi
 
-echo "📋 Distribution détectée: $OS $VER"
-echo "📋 Detected distribution: $OS $VER"
+echo "✅ Debian 12 détecté - Poursuite de l'installation"
+echo "✅ Debian 12 detected - Continuing installation"
 
-# Installation selon la distribution / Install based on distribution
-case $OS in
-    *Ubuntu*|*Debian*)
-        echo "🔄 Installation des paquets Ubuntu/Debian..."
-        sudo apt update
+# Installation des paquets Debian 12
+echo "🔄 Installation des paquets Debian 12..."
+sudo apt update
 
-        # Essayer d'installer les en-têtes spécifiques au noyau
-        if ! sudo apt install -y linux-headers-$(uname -r) 2>/dev/null; then
-            echo "⚠️  En-têtes spécifiques non disponibles, installation des en-têtes génériques..."
-            sudo apt install -y \
-                linux-headers-amd64 \
-                linux-headers-generic \
-                linux-libc-dev
-        fi
+# Installer les en-têtes du noyau spécifiques à la version courante
+echo "📦 Installation des en-têtes du noyau..."
+if ! sudo apt install -y linux-headers-$(uname -r) 2>/dev/null; then
+    echo "⚠️  En-têtes spécifiques non disponibles, installation des en-têtes génériques..."
+    sudo apt install -y \
+        linux-headers-amd64 \
+        linux-headers-generic \
+        linux-libc-dev
+fi
 
-        # Installer les autres dépendances
-        sudo apt install -y \
-            libbpf-dev \
-            libelf-dev \
-            clang \
-            llvm \
-            gcc \
-            make \
-            pkg-config \
-            zlib1g-dev
+# Installer les dépendances de développement BPF/XDP
+echo "📦 Installation des outils de développement BPF/XDP..."
+sudo apt install -y \
+    libbpf-dev \
+    libelf-dev \
+    clang \
+    llvm \
+    gcc \
+    make \
+    pkg-config \
+    zlib1g-dev \
+    bpftool \
+    linux-tools-common \
+    linux-tools-generic
 
-        # Essayer d'installer bpftool (peut ne pas être disponible sur toutes les versions)
-        sudo apt install -y bpftool 2>/dev/null || echo "⚠️  bpftool non disponible dans les dépôts"
-        ;;
-    *CentOS*|*"Red Hat"*|*Rocky*)
-        echo "🔄 Installation des paquets CentOS/RHEL/Rocky..."
-        if command -v dnf >/dev/null 2>&1; then
-            sudo dnf install -y \
-                kernel-devel \
-                kernel-headers \
-                libbpf-devel \
-                clang \
-                llvm \
-                bpftool \
-                gcc \
-                make \
-                pkgconfig
-        else
-            sudo yum install -y \
-                kernel-devel \
-                kernel-headers \
-                libbpf-devel \
-                clang \
-                llvm \
-                gcc \
-                make \
-                pkgconfig
-        fi
-        ;;
-    *Fedora*)
-        echo "🔄 Installation des paquets Fedora..."
-        sudo dnf install -y \
-            kernel-devel \
-            kernel-headers \
-            libbpf-devel \
-            clang \
-            llvm \
-            bpftool \
-            gcc \
-            make \
-            pkgconfig
-        ;;
-    *Arch*)
-        echo "🔄 Installation des paquets Arch Linux..."
-        sudo pacman -S --noconfirm \
-            linux-headers \
-            libbpf \
-            clang \
-            llvm \
-            bpf \
-            gcc \
-            make \
-            pkgconfig
-        ;;
-    *)
-        echo "❌ Distribution non supportée: $OS"
-        echo "❌ Unsupported distribution: $OS"
-        echo "📋 Veuillez installer manuellement:"
-        echo "📋 Please install manually:"
-        echo "   - kernel-headers/linux-headers"
-        echo "   - libbpf-dev/libbpf-devel"
-        echo "   - clang, llvm, gcc, make"
-        exit 1
-        ;;
-esac
+# Installer les outils réseau et de monitoring
+echo "📦 Installation des outils réseau et de monitoring..."
+sudo apt install -y \
+    iproute2 \
+    ethtool \
+    tcpdump \
+    curl \
+    jq \
+    htop
+
+# Vérifier que bpftool est disponible
+if ! command -v bpftool >/dev/null 2>&1; then
+    echo "❌ bpftool n'est pas disponible après l'installation"
+    echo "❌ bpftool is not available after installation"
+    exit 1
+fi
 
 # Vérification de l'installation / Verify installation
 echo "🔍 Vérification de l'installation..."

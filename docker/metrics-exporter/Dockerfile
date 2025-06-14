@@ -1,10 +1,11 @@
-# Exportateur de métriques pour le filtre XDP FiveM
+# Exportateur de métriques pour le filtre XDP FiveM - Debian 12
 # Exporte les statistiques BPF au format Prometheus
-FROM python:3.11-slim
+FROM python:3.11-slim-bookworm
 
-# Installer les dépendances système
+# Installer les dépendances système pour Debian 12
 RUN apt-get update && apt-get install -y \
     bpftool \
+    linux-tools-common \
     && rm -rf /var/lib/apt/lists/*
 
 # Créer le répertoire de travail

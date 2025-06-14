@@ -1,36 +1,43 @@
-# 🛡️ FiveM XDP Filter - Protection DDoS Avancée
+# 🛡️ FiveM XDP Filter - Protection DDoS Avancée (Debian 12)
 
-Ce système de filtrage XDP protège les serveurs FiveM contre les attaques DDoS et le trafic malveillant. Il inclut un déploiement automatisé avec surveillance en temps réel via Grafana.
+Ce système de filtrage XDP protège les serveurs FiveM contre les attaques DDoS et le trafic malveillant. Optimisé exclusivement pour **Debian 12 (Bookworm)** avec déploiement automatisé et surveillance en temps réel via Grafana.
 
-## 🚀 Démarrage Rapide
+## 🚀 Installation en Une Commande
 
-**Déploiement en une commande :**
+**Installation complète automatisée :**
 ```bash
-sudo ./deploy.sh deploy -s 192.168.1.100 -n mon-serveur
+sudo ./install.sh -s 192.168.1.100
 ```
 
-**Accès aux interfaces :**
+**Installation avec options avancées :**
+```bash
+sudo ./install.sh -s 192.168.1.100 -i eth0 -z medium -n mon-serveur
+```
+
+**Accès aux interfaces après installation :**
 - 📊 **Grafana** : http://localhost:3000 (admin/admin123)
 - 🔍 **Prometheus** : http://localhost:9090
 - 🚨 **AlertManager** : http://localhost:9093
+- 📈 **Métriques** : http://localhost:9100/metrics
 
-## 📋 Prérequis
+## 📋 Prérequis Système
 
-- **OS :** Linux avec support XDP (Ubuntu 20.04+ recommandé)
-- **Kernel :** Version 4.18+ avec support XDP/eBPF
-- **Docker :** Version 20.10+
-- **Docker Compose :** Version 2.0+ (syntaxe moderne)
-- **Privilèges :** Accès root requis
-- **Outils :** clang, gcc, bpftool (installés automatiquement)
+- **OS :** Debian 12 (Bookworm) **EXCLUSIVEMENT**
+- **Kernel :** Version 5.10+ avec support XDP/eBPF complet
+- **Privilèges :** Accès root (sudo) requis
+- **Connexion :** Internet pour téléchargement des dépendances
+- **Ressources :** 2GB RAM minimum, 10GB espace disque
 
 ## 🎯 Fonctionnalités
 
 - ✅ **Protection DDoS avancée** avec filtrage XDP haute performance
-- ✅ **Déploiement automatisé** pour multiple serveurs FiveM
+- ✅ **Installation en une commande** - Zéro configuration manuelle
+- ✅ **Optimisé pour Debian 12** - Performance et stabilité maximales
 - ✅ **Surveillance complète** avec Prometheus + Grafana
 - ✅ **Alertes intelligentes** via AlertManager
-- ✅ **Configuration flexible** (small/medium/large servers)
-- ✅ **Containerisation complète** pour faciliter la gestion
+- ✅ **Configuration flexible** (small/medium/large/dev servers)
+- ✅ **Containerisation complète** avec Docker natif
+- ✅ **Validation système automatique** - Détection d'erreurs précoce
 
 ## 📖 Documentation Complète
 
@@ -40,68 +47,120 @@ sudo ./deploy.sh deploy -s 192.168.1.100 -n mon-serveur
 - 📋 **[Rapport de Validation](VALIDATION_REPORT.md)** - Tests et validation
 - 📚 **[Documentation Technique](xdp_docs/README.md)** - Détails techniques
 
-## 🛠️ Installation Manuelle (Avancée)
+## 🛠️ Options d'Installation
 
-Si vous préférez une installation manuelle sans Docker :
-
-### Étape 1 : Compilation
+### Installation Rapide (Recommandée)
 ```bash
-# Compiler le filtre XDP et les outils
+# Installation basique avec monitoring complet
+sudo ./install.sh -s 192.168.1.100
+
+# Installation pour serveur de production
+sudo ./install.sh -s 192.168.1.100 -i eth0 -z large -n prod-server
+
+# Installation pour développement (sans monitoring)
+sudo ./install.sh -s 127.0.0.1 -z dev --no-monitoring
+```
+
+### Options Disponibles
+```bash
+sudo ./install.sh [OPTIONS]
+
+OPTIONS:
+  -s, --server-ip IP      Adresse IP du serveur FiveM (REQUIS)
+  -i, --interface IFACE   Interface réseau (défaut: eth0)
+  -z, --size SIZE         Taille: small|medium|large|dev (défaut: medium)
+  -n, --name NAME         Nom du serveur (défaut: auto-généré)
+  -p, --port PORT         Port FiveM (défaut: 30120)
+  --no-monitoring         Désactiver la surveillance
+  --force                 Forcer la réinstallation
+  -h, --help              Afficher l'aide complète
+```
+
+### Installation Manuelle (Experts)
+
+Si vous préférez une installation étape par étape :
+
+```bash
+# 1. Installer les dépendances
+sudo ./install-dependencies.sh
+
+# 2. Compiler le filtre XDP
 make all
-```
 
-### Étape 2 : Installation
-```bash
-# Installer le filtre sur l'interface réseau
-sudo make install INTERFACE=eth0
-```
+# 3. Déployer avec Docker
+sudo ./deploy.sh deploy -s 192.168.1.100 -n mon-serveur
 
-### Étape 3 : Configuration
-```bash
-# Configurer pour votre serveur (remplacez l'IP)
-make config-medium SERVER_IP=192.168.1.100
-```
-
-### Étape 4 : Vérification
-```bash
-# Vérifier le fonctionnement
+# 4. Vérifier le fonctionnement
 make stats
 ```
 
-### Step 3: Load the XDP Program
-
-Load the compiled XDP program into the network interface that your FiveM server uses. Replace `<interface>` with the name of your network interface (e.g., `eth0`):
-
-```bash 
-ip link set dev <interface> xdp obj xdp_program.o sec xdp_program
-```
-
-### Step 4: Verify the XDP Program
-
-Test the XDP program by generating traffic to your FiveM server on the configured port (default: 30120). Ensure that non-FiveM traffic is being dropped and legitimate FiveM traffic is allowed to pass through.
-
-You can use packet-capturing tools like tcpdump to verify traffic behavior:
+### Gestion Post-Installation
 
 ```bash
-tcpdump -i <interface>
+# Voir l'état des services
+sudo ./deploy.sh status
+
+# Voir les logs en temps réel
+sudo ./deploy.sh logs -n mon-serveur
+
+# Voir les statistiques du filtre
+make stats
+
+# Arrêter un serveur
+sudo ./deploy.sh remove -n mon-serveur
 ```
 
-### Step 5: Monitor Packet Counts
+## 🔧 Dépannage Rapide
 
-The program includes logging for tracking how many packets are dropped or passed. Use bpftool to check the statistics:
+### Problèmes Courants
+
+**Erreur "Distribution non supportée"**
+```bash
+# Vérifier la version de Debian
+cat /etc/os-release
+# Doit afficher: ID=debian, VERSION_ID="12"
+```
+
+**Docker non disponible**
+```bash
+# Le script install.sh installe Docker automatiquement
+# Si problème, installer manuellement:
+sudo apt update && sudo apt install docker.io docker-compose-plugin
+```
+
+**Interface réseau introuvable**
+```bash
+# Lister les interfaces disponibles
+ip link show
+# Utiliser le bon nom avec -i
+sudo ./install.sh -s 192.168.1.100 -i ens18
+```
+
+### Support et Logs
 
 ```bash
-bpftool map dump name packet_count_map
+# Logs détaillés du système
+journalctl -u docker -f
+
+# Logs des conteneurs FiveM XDP
+docker logs fivem-xdp-mon-serveur
+
+# Vérification de l'état XDP
+sudo bpftool prog show
 ```
 
-## Unloading the XDP Program
+## 📚 Documentation Technique
 
-If you need to unload the XDP program from the interface, run the following command:
+- 🚀 **[Guide de Démarrage Rapide](xdp_docs/QUICK_START.md)** - Installation en 5 minutes
+- 🐳 **[Documentation Docker](docker/README.md)** - Containerisation et monitoring
+- 📊 **[Solution de Déploiement](xdp_docs/DEPLOYMENT_SOLUTION.md)** - Architecture complète
+- 📋 **[Rapport de Validation](xdp_docs/VALIDATION_REPORT.md)** - Tests et validation
+- 📚 **[Documentation Technique](xdp_docs/README.md)** - Détails techniques avancés
 
-```bash
-ip link set dev <interface> xdp off
-```
+## 📄 Licence
 
-## License
+Ce programme XDP est publié sous licence MIT. Voir le fichier LICENSE pour plus d'informations.
 
-This XDP program is released under the MIT license. See the LICENSE file for more information.
+---
+
+**🎯 Optimisé pour Debian 12 | 🛡️ Protection DDoS Avancée | 🚀 Installation en Une Commande**

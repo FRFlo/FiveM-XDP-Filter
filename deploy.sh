@@ -112,10 +112,10 @@ check_prerequisites() {
         exit 1
     fi
     
-    # Vérifier les outils BPF
+    # Vérifier les outils BPF pour Debian 12
     if ! command -v bpftool >/dev/null 2>&1; then
-        log_warning "bpftool n'est pas installé, installation..."
-        apt-get update && apt-get install -y linux-tools-common linux-tools-generic bpftool
+        log_warning "bpftool n'est pas installé, installation pour Debian 12..."
+        apt-get update && apt-get install -y linux-tools-common bpftool
     fi
     
     # Vérifier le support XDP du kernel

@@ -1,22 +1,24 @@
-# FiveM XDP Filter Manager Container
+# FiveM XDP Filter Manager Container - Debian 12
 # Manages XDP filter deployment, configuration, and lifecycle
-FROM ubuntu:22.04
+FROM debian:12-slim
 
 # Éviter les prompts interactifs pendant l'installation
 ENV DEBIAN_FRONTEND=noninteractive
 
-# Installer les dépendances système requises
+# Installer les dépendances système requises pour Debian 12
 RUN apt-get update && apt-get install -y \
     clang \
     gcc \
     libbpf-dev \
-    linux-tools-common \
-    linux-tools-generic \
+    linux-headers-amd64 \
     bpftool \
+    linux-tools-common \
     iproute2 \
     make \
     curl \
     jq \
+    pkg-config \
+    libelf-dev \
     && rm -rf /var/lib/apt/lists/*
 
 # Créer le répertoire de travail
