@@ -5,7 +5,7 @@
 CLANG ?= clang
 GCC ?= gcc
 CFLAGS := -O2 -Wall -Wextra
-BPF_CFLAGS := -O2 -target bpf -D__TARGET_ARCH_x86
+BPF_CFLAGS := -O2 -target bpf -D__TARGET_ARCH_x86 -I/usr/src/linux-headers-$(shell uname -r)/include -I/usr/src/linux-headers-$(shell uname -r)/arch/x86/include
 LDFLAGS := -lbpf
 
 # Source files
